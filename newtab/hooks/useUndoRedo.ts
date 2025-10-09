@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { chromeBookmarkService } from '../services/chromeBookmarkService';
 
 export interface UndoFrame {
   id: string;
@@ -152,7 +153,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     for (const bookmarkId of frame.affectedBookmarks) {
       const bookmark = previousState.bookmarks?.find((b: any) => b.id === bookmarkId);
       if (bookmark) {
-        await chrome.bookmarks.move(bookmarkId, {
+        await chromeBookmarkService.moveBookmark(bookmarkId, {
           parentId: bookmark.parentId,
           index: bookmark.index
         });
@@ -166,7 +167,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     for (const bookmarkId of frame.affectedBookmarks) {
       const bookmark = previousState.bookmarks?.find((b: any) => b.id === bookmarkId);
       if (bookmark) {
-        await chrome.bookmarks.move(bookmarkId, {
+        await chromeBookmarkService.moveBookmark(bookmarkId, {
           parentId: bookmark.parentId,
           index: bookmark.index
         });
@@ -179,7 +180,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     
     // Recreate deleted bookmarks
     for (const bookmark of newState.deletedBookmarks || []) {
-      await chrome.bookmarks.create({
+      await chromeBookmarkService.createBookmark({
         parentId: bookmark.parentId,
         title: bookmark.title,
         url: bookmark.url,
@@ -193,7 +194,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     
     // Delete created bookmarks
     for (const bookmarkId of frame.affectedBookmarks) {
-      await chrome.bookmarks.remove(bookmarkId);
+      await chromeBookmarkService.removeBookmark(bookmarkId);
     }
   };
 
@@ -202,7 +203,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     
     // Restore previous bookmark properties
     for (const bookmark of previousState.bookmarks || []) {
-      await chrome.bookmarks.update(bookmark.id, {
+      await chromeBookmarkService.updateBookmark(bookmark.id, {
         title: bookmark.title,
         url: bookmark.url
       });
@@ -217,7 +218,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     for (const bookmarkId of frame.affectedBookmarks) {
       const bookmark = newState.bookmarks?.find((b: any) => b.id === bookmarkId);
       if (bookmark) {
-        await chrome.bookmarks.move(bookmarkId, {
+        await chromeBookmarkService.moveBookmark(bookmarkId, {
           parentId: bookmark.parentId,
           index: bookmark.index
         });
@@ -231,7 +232,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     for (const bookmarkId of frame.affectedBookmarks) {
       const bookmark = newState.bookmarks?.find((b: any) => b.id === bookmarkId);
       if (bookmark) {
-        await chrome.bookmarks.move(bookmarkId, {
+        await chromeBookmarkService.moveBookmark(bookmarkId, {
           parentId: bookmark.parentId,
           index: bookmark.index
         });
@@ -242,7 +243,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
   const applyDeleteRedo = async (frame: UndoFrame): Promise<void> => {
     // Delete bookmarks again
     for (const bookmarkId of frame.affectedBookmarks) {
-      await chrome.bookmarks.remove(bookmarkId);
+      await chromeBookmarkService.removeBookmark(bookmarkId);
     }
   };
 
@@ -251,7 +252,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     
     // Recreate bookmarks
     for (const bookmark of newState.createdBookmarks || []) {
-      await chrome.bookmarks.create({
+      await chromeBookmarkService.createBookmark({
         parentId: bookmark.parentId,
         title: bookmark.title,
         url: bookmark.url,
@@ -265,7 +266,7 @@ export const useUndoRedo = (): UseUndoRedoReturn => {
     
     // Apply the updated properties
     for (const bookmark of newState.bookmarks || []) {
-      await chrome.bookmarks.update(bookmark.id, {
+      await chromeBookmarkService.updateBookmark(bookmark.id, {
         title: bookmark.title,
         url: bookmark.url
       });

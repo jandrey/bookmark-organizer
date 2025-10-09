@@ -10,7 +10,7 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["bookmarks", "ai"],
+  "permissions": ["bookmarks", "ai", "tabs"],
   "chrome_url_overrides": {
     "bookmarks": "newtab/index.html"
   },

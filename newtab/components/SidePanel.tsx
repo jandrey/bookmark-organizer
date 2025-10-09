@@ -15,6 +15,7 @@ import QueueTab from './QueueTab';
 import HealthTab from './HealthTab';
 import { useUndoRedo } from '../hooks/useUndoRedo';
 import type { BookmarkCluster, QueueItem, HealthIssue } from '../types';
+import { chromeBookmarkService } from '../services/chromeBookmarkService';
 // Force recompilation
 
 
@@ -28,19 +29,28 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
   const [clusters, setClusters] = useState<BookmarkCluster[]>([]);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  
-  const { undoStack, redoStack, performUndo, performRedo, canUndo, canRedo } = useUndoRedo();
 
   // Load initial data
   useEffect(() => {
     loadInitialData();
   }, []);
 
+  // Handle navigation events from child components (e.g., SessionsTab)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<{ tab: 'sessions' | 'queue' | 'health' }>;
+      if (custom && custom.detail && custom.detail.tab) {
+        setActiveTab(custom.detail.tab);
+      }
+    };
+    window.addEventListener('bookmarkOrganizer:navigate', handler as EventListener);
+    return () => window.removeEventListener('bookmarkOrganizer:navigate', handler as EventListener);
+  }, []);
+
   const loadInitialData = async () => {
     try {
-      // Load bookmarks from Chrome API
-      const bookmarks = await chrome.bookmarks.getTree();
+      // Load bookmarks from Chrome API via service
+      const bookmarks = await chromeBookmarkService.getBookmarkTree();
       console.log('Loaded bookmarks:', bookmarks);
       
       // Initialize with mock data for demo
@@ -129,69 +139,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
     ]);
   };
 
-  const handleScanLibrary = async () => {
-    setIsScanning(true);
-    try {
-      // Simulate AI processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Generate new clusters based on current bookmarks
-      const newClusters = await generateClusters();
-      setClusters(newClusters);
-    } catch (error) {
-      console.error('Failed to scan library:', error);
-    } finally {
-      setIsScanning(false);
-    }
-  };
 
-  const generateClusters = async (): Promise<BookmarkCluster[]> => {
-    // Mock AI clustering - in real implementation, this would use AI service
-    return [
-      {
-        id: 'new1',
-        title: 'AI & Machine Learning',
-        description: 'Articles and resources about AI, ML, and data science',
-        itemCount: 15,
-        bookmarks: [],
-        confidence: 0.91
-      },
-      {
-        id: 'new2',
-        title: 'Productivity Tools',
-        description: 'Apps and tools for productivity and workflow optimization',
-        itemCount: 9,
-        bookmarks: [],
-        confidence: 0.87
-      }
-    ];
-  };
-
-  const handleApplyChanges = async (clusters: BookmarkCluster[]) => {
-    try {
-      // Create undo frame before applying changes
-      const undoFrame = {
-        type: 'reorganize',
-        timestamp: new Date(),
-        previousState: { clusters: [...clusters] },
-        newState: { clusters: clusters }
-      };
-
-      // Apply changes via Chrome API
-      for (const cluster of clusters) {
-        // Move bookmarks to new folders
-        // This would use chrome.bookmarks.move() in real implementation
-        console.log(`Moving bookmarks to cluster: ${cluster.title}`);
-      }
-
-      // Add to undo stack
-      // undoStack.push(undoFrame);
-      
-      console.log('Changes applied successfully');
-    } catch (error) {
-      console.error('Failed to apply changes:', error);
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -231,12 +179,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
 
       <div className="side-panel__content">
         {activeTab === 'sessions' && (
-          <SessionsTab
-            clusters={clusters}
-            isScanning={isScanning}
-            onScanLibrary={handleScanLibrary}
-            onApplyChanges={handleApplyChanges}
-          />
+          <SessionsTab/>
         )}
         
         {activeTab === 'queue' && (
@@ -252,27 +195,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
             onUpdateIssues={setHealthIssues}
           />
         )}
-      </div>
-
-      <div className="side-panel__footer">
-        <div className="undo-redo-controls">
-          <button
-            onClick={performUndo}
-            disabled={!canUndo}
-            className="undo-redo-btn"
-            title="Undo last action"
-          >
-            ↶ Undo
-          </button>
-          <button
-            onClick={performRedo}
-            disabled={!canRedo}
-            className="undo-redo-btn"
-            title="Redo last action"
-          >
-            ↷ Redo
-          </button>
-        </div>
       </div>
     </div>
   );

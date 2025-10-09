@@ -50,32 +50,11 @@ export default function NewTabApp(): React.JSX.Element {
         <p>
           Browse your bookmarks in a Windows Explorer-style tree view with AI-powered organization.
         </p>
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-          <button
-            onClick={() => setShowSidePanel(!showSidePanel)}
-            style={{
-              padding: '0.8rem 1.5rem',
-              backgroundColor: '#ff6b35',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '1.2rem',
-              fontWeight: '500'
-            }}
-          >
-            {showSidePanel ? 'Hide Manager' : 'Show Manager'} 📋
-          </button>
-        </div>
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}></div>
       </header>
 
-      <main>
-        <WindowsExplorerBookmarks />
-
-      </main>
-
       <SidePanel
-        isOpen={showSidePanel}
+        isOpen={true}
         onClose={() => setShowSidePanel(false)}
       />
     </div>

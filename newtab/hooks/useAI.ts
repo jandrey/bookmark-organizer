@@ -21,6 +21,7 @@ export interface UseAIActions {
   generateSuggestions: (bookmarks: Array<{ title: string; url: string }>) => Promise<string[]>;
   organizeBookmarks: (bookmarks: Array<{ title: string; url: string }>) => Promise<Record<string, number[]>>;
   searchBookmarks: (query: string, bookmarks: Array<{ title: string; url: string }>) => Promise<number[]>;
+  categorizeBookmarks: (bookmarks: Array<{ title: string; url: string }>) => Promise<Record<string, Record<string, string>>>;
   initialize: (config: AIConfig) => Promise<void>;
 }
 
@@ -139,6 +140,23 @@ export const useAI = (): UseAIState & UseAIActions => {
     }
   }, [aiService]);
 
+  const categorizeBookmarks = useCallback(async (bookmarks: Array<{ title: string; url: string }>) => {
+    if (!aiService) {
+      throw new Error('AI service not initialized');
+    }
+    try {
+      setIsLoading(true);
+      setError(null);
+      return await aiService.categorizeBookmarks(bookmarks);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to categorize bookmarks';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [aiService]);
+
   return {
     isLoading,
     error,
@@ -148,6 +166,7 @@ export const useAI = (): UseAIState & UseAIActions => {
     generateSuggestions,
     organizeBookmarks,
     searchBookmarks,
+    categorizeBookmarks,
     initialize,
   };
 };

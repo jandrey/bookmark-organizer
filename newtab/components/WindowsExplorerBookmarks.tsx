@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import type { BookmarkNode } from '../types';
+import { chromeBookmarkService } from '../services/chromeBookmarkService';
 
 interface WindowsExplorerBookmarksProps {
   className?: string;
@@ -31,7 +32,7 @@ export const WindowsExplorerBookmarks: React.FC<WindowsExplorerBookmarksProps> =
       setError(null);
       
       console.log('Building Windows Explorer-style bookmark tree...');
-      const bookmarkTree = await chrome.bookmarks.getTree();
+      const bookmarkTree = await chromeBookmarkService.getBookmarkTree();
       const nodes: BookmarkTreeNode[] = [];
 
       const processNode = (node: BookmarkNode, level: number = 0): BookmarkTreeNode => {

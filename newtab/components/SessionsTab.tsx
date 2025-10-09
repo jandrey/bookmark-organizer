@@ -11,15 +11,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import type { BookmarkCluster, BookmarkNode } from '../types';
-import { initializeAI } from '../services/aiService';
 import { AI_CONFIG } from '../constants';
+import { chromeBookmarkService } from '../services/chromeBookmarkService';
+import { useAI } from '../hooks/useAI';
+import { useChromeBookmarks } from '../hooks/useChromeBookmarks';
 
-interface SessionsTabProps {
-  clusters: BookmarkCluster[];
-  isScanning: boolean;
-  onScanLibrary: () => Promise<void>;
-  onApplyChanges: (clusters: BookmarkCluster[]) => Promise<void>;
-}
+interface SessionsTabProps {}
 
 interface BookmarkTreeNode {
   id: string;
@@ -31,12 +28,7 @@ interface BookmarkTreeNode {
   isFolder: boolean;
 }
 
-export const SessionsTab: React.FC<SessionsTabProps> = ({
-  clusters,
-  isScanning,
-  onScanLibrary,
-  onApplyChanges,
-}) => {
+export const SessionsTab: React.FC<SessionsTabProps> = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [selectedClusters, setSelectedClusters] = useState<string[]>([]);
   const [scanResults, setScanResults] = useState<{
@@ -50,7 +42,6 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   const [treeNodes, setTreeNodes] = useState<BookmarkTreeNode[]>([]);
   const [isLoadingBookmarks, setIsLoadingBookmarks] = useState(false);
   const [bookmarkError, setBookmarkError] = useState<string | null>(null);
-  const [showCurrentBookmarks, setShowCurrentBookmarks] = useState(false);
   
   // AI categorization state
   const [aiCategorizedBookmarks, setAiCategorizedBookmarks] = useState<Record<string, Record<string, string>> | null>(null);
@@ -58,19 +49,28 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   const [previewCategories, setPreviewCategories] = useState<Record<string, Record<string, string>> | null>(null);
   // Expanded/collapsed state for preview categories
   const [previewExpanded, setPreviewExpanded] = useState<Record<string, boolean>>({});
+  const [resultsExpanded, setResultsExpanded] = useState<Record<string, boolean>>({});
   const [originalBookmarks, setOriginalBookmarks] = useState<Array<{ title: string; url: string }>>([]);
   const [isAICategorizing, setIsAICategorizing] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [scanEntireSession, setScanEntireSession] = useState(false);
+  const [openTabsPreview, setOpenTabsPreview] = useState<Array<{ title: string; url: string }>>([]);
   
   // Undo functionality
   type SavedNode = { title: string; url?: string; children?: SavedNode[] };
   const [bookmarkBackup, setBookmarkBackup] = useState<{ bar: SavedNode[]; other: SavedNode[] } | null>(null);
   const [hasAppliedChanges, setHasAppliedChanges] = useState(false);
   
-  // AI service state
-  const [aiService, setAiService] = useState<any>(null);
+  // AI hook
+  const { isLoading: aiLoading, error: aiError, isInitialized, initialize, categorizeBookmarks } = useAI();
+
+  // Chrome bookmarks hook
+  const { getOpenTabs, getBookmarkTree } = useChromeBookmarks();
+
   // Drag & Drop state for preview modal
   const [dragItem, setDragItem] = useState<{ category: string; title: string; url: string } | null>(null);
   const previewBodyRef = React.useRef<HTMLDivElement | null>(null);
+  const progressTimerRef = React.useRef<number | null>(null);
   
   const mockBookmarks = [
     {
@@ -349,11 +349,17 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   const handleScanLibrary = async () => {
     try {
       setIsAICategorizing(true);
+      setScanProgress({ current: 0, total: 0 });
       
-      // Get current bookmarks from Chrome
-      // const bookmarkTree = await chrome.bookmarks.getTree();
-      
-      const bookmarkTree = mockBookmarks
+      // Get current bookmarks (try real API, fallback to mock)
+      let bookmarkTree: any[] = [];
+      try {
+        // bookmarkTree = await getBookmarkTree();
+        bookmarkTree = mockBookmarks
+      } catch {
+        bookmarkTree = mockBookmarks as any[];
+      }
+
       const bookmarks: Array<{ title: string; url: string }> = [];
       
       const extractBookmarks = (node: BookmarkNode) => {
@@ -370,21 +376,54 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
           rootNode.children.forEach(extractBookmarks);
         }
       });
-      
+
+      // Optionally include open tabs when scanning entire session
+      const baseCount = bookmarks.length;
+      let tabsCount = 0;
+      console.log('bookmarks just → ', bookmarks)
+      if (scanEntireSession) {
+        try {
+          const openTabs = await getOpenTabs();
+          for (const tab of openTabs) {
+            if (tab.url) {
+              bookmarks.push({ title: tab.title, url: tab.url });
+            }
+          }
+          tabsCount = openTabs.filter(t => !!t.url).length;
+          console.log('bookmarks with tabs → ', bookmarks)
+        } catch (e) {
+          console.warn('Could not fetch open tabs, proceeding with bookmarks only.', e);
+        }
+      }
       setOriginalBookmarks(bookmarks);
+
+
+      const totalToProcess = baseCount + tabsCount;
+      setScanProgress({ current: 0, total: totalToProcess });
+      if (progressTimerRef.current) window.clearInterval(progressTimerRef.current);
+      progressTimerRef.current = window.setInterval(() => {
+        setScanProgress(prev => {
+          if (prev.total === 0) return prev;
+          const step = Math.max(1, Math.ceil(prev.total * 0.03));
+          const next = Math.min(prev.total - 1, prev.current + step);
+          return { current: next, total: prev.total };
+        });
+      }, 200);
       
       // Send to AI for categorization
-      if (!aiService) {
-        throw new Error('AI service not initialized. Please check your API key.');
+      if (!isInitialized) {
+        throw new Error('AI not initialized. Please check your API key.');
       }
 
-      const categorizedBookmarks = await aiService.categorizeBookmarks(bookmarks);
+      // tabs already merged above when scanEntireSession is true
+      const categorizedBookmarks = await categorizeBookmarks(bookmarks);
       setAiCategorizedBookmarks(categorizedBookmarks);
+      setScanProgress(prev => ({ current: prev.total, total: prev.total }));
       
       // Update scan results
       setScanResults({
-        totalBookmarks: bookmarks.length,
-        totalTabs: 0, // We're not scanning tabs in this implementation
+        totalBookmarks: baseCount,
+        totalTabs: tabsCount,
         clustersFound: Object.keys(categorizedBookmarks).length,
         processingTime: 2.3
       });
@@ -395,6 +434,10 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
       console.error('Error scanning library:', error);
       setBookmarkError('Failed to scan bookmarks and categorize with AI');
     } finally {
+      if (progressTimerRef.current) {
+        window.clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
       setIsAICategorizing(false);
     }
   };
@@ -414,6 +457,19 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
     setShowPreview(true);
   };
 
+  // Expand all result categories by default when new results arrive
+  useEffect(() => {
+    if (aiCategorizedBookmarks) {
+      const expanded: Record<string, boolean> = {};
+      Object.keys(aiCategorizedBookmarks).forEach(cat => { expanded[cat] = true; });
+      setResultsExpanded(expanded);
+    }
+  }, [aiCategorizedBookmarks]);
+
+  const toggleResultCategory = (category: string) => {
+    setResultsExpanded(prev => ({ ...prev, [category]: !(prev[category] ?? true) }));
+  };
+
   const handleApplyChanges = async () => {
     if (!aiCategorizedBookmarks && !previewCategories) return;
     
@@ -427,25 +483,25 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
       });
 
       const snapshotChildren = async (rootId: string): Promise<SavedNode[]> => {
-        const subtree = await chrome.bookmarks.getSubTree(rootId);
+        const subtree = await chromeBookmarkService.getSubTree(rootId);
         const root = subtree && subtree.length > 0 ? subtree[0] as unknown as BookmarkNode : null;
         const children = root && root.children ? root.children : [];
         return children.map(snapshotNode);
       };
 
       const deleteAllChildren = async (rootId: string): Promise<void> => {
-        const children = await chrome.bookmarks.getChildren(rootId);
+        const children = await chromeBookmarkService.getChildren(rootId);
         for (const child of children) {
-          await chrome.bookmarks.removeTree(child.id);
+          await chromeBookmarkService.removeBookmarkTree(child.id);
         }
       };
 
       const restoreChildren = async (parentId: string, nodes: SavedNode[]): Promise<void> => {
         for (const n of nodes) {
           if (n.url) {
-            await chrome.bookmarks.create({ parentId, title: n.title, url: n.url });
+            await chromeBookmarkService.createBookmark({ parentId, title: n.title, url: n.url });
           } else {
-            const folder = await chrome.bookmarks.create({ parentId, title: n.title });
+            const folder = await chromeBookmarkService.createBookmark({ parentId, title: n.title });
             if (n.children && n.children.length > 0) {
               await restoreChildren(folder.id, n.children);
             }
@@ -468,9 +524,9 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
 
       // 3) Recreate new structure under Bookmarks Bar ('1')
       for (const [category, bookmarks] of Object.entries(structure)) {
-        const folder = await chrome.bookmarks.create({ title: category, parentId: '1' });
+        const folder = await chromeBookmarkService.createBookmark({ title: category, parentId: '1' });
         for (const [title, url] of Object.entries(bookmarks)) {
-          await chrome.bookmarks.create({ title, url, parentId: folder.id });
+          await chromeBookmarkService.createBookmark({ title, url, parentId: folder.id });
         }
       }
       
@@ -481,11 +537,29 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
       await buildTreeStructure();
       
       console.log('Successfully applied AI categorization changes');
+      // Signal applied state for success card rendering
+      // (hasAppliedChanges already true). Optionally navigate prompt could occur here.
       
     } catch (error) {
       console.error('Error applying changes:', error);
       setBookmarkError('Failed to apply bookmark reorganization');
     }
+  };
+
+  const handleNewScan = () => {
+    setAiCategorizedBookmarks(null);
+    setPreviewCategories(null);
+    setPreviewExpanded({});
+    setScanResults(null);
+    setShowPreview(false);
+    setBookmarkError(null);
+    setSelectedClusters([]);
+    setScanProgress({ current: 0, total: 0 });
+    setOpenTabsPreview([]);
+  };
+
+  const handleNavigateQueue = () => {
+    window.dispatchEvent(new CustomEvent('bookmarkOrganizer:navigate', { detail: { tab: 'queue' } }));
   };
 
   // ---------- Preview Drag & Drop handlers ----------
@@ -547,18 +621,18 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
     try {
       // Clear current contents and restore from backup
       const deleteAllChildren = async (rootId: string): Promise<void> => {
-        const children = await chrome.bookmarks.getChildren(rootId);
+        const children = await chromeBookmarkService.getChildren(rootId);
         for (const child of children) {
-          await chrome.bookmarks.removeTree(child.id);
+          await chromeBookmarkService.removeBookmarkTree(child.id);
         }
       };
 
       const restoreChildren = async (parentId: string, nodes: SavedNode[]): Promise<void> => {
         for (const n of nodes) {
           if (n.url) {
-            await chrome.bookmarks.create({ parentId, title: n.title, url: n.url });
+            await chromeBookmarkService.createBookmark({ parentId, title: n.title, url: n.url });
           } else {
-            const folder = await chrome.bookmarks.create({ parentId, title: n.title });
+            const folder = await chromeBookmarkService.createBookmark({ parentId, title: n.title });
             if (n.children && n.children.length > 0) {
               await restoreChildren(folder.id, n.children);
             }
@@ -583,21 +657,6 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
     }
   };
 
-  const toggleClusterSelection = (clusterId: string) => {
-    setSelectedClusters(prev => 
-      prev.includes(clusterId)
-        ? prev.filter(id => id !== clusterId)
-        : [...prev, clusterId]
-    );
-  };
-
-  const selectAllClusters = () => {
-    setSelectedClusters(clusters.map(c => c.id));
-  };
-
-  const deselectAllClusters = () => {
-    setSelectedClusters([]);
-  };
 
   // Build tree structure from Chrome bookmarks (similar to WindowsExplorerBookmarks)
   const buildTreeStructure = useCallback(async (): Promise<void> => {
@@ -606,7 +665,7 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
       setBookmarkError(null);
       
       console.log('Building bookmark tree for Sessions tab...');
-      const bookmarkTree = await chrome.bookmarks.getTree();
+      const bookmarkTree = await chromeBookmarkService.getBookmarkTree();
       const nodes: BookmarkTreeNode[] = [];
 
       const processNode = (node: BookmarkNode, level: number = 0): BookmarkTreeNode => {
@@ -677,31 +736,49 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
     }
   }, []);
 
-  // Initialize AI service on mount
+  // Initialize AI service on mount via hook
   useEffect(() => {
-    const initializeAIService = async () => {
+    const doInit = async () => {
       try {
-        const aiServiceInstance = initializeAI({
+        await initialize({
           apiKey: AI_CONFIG.FALLBACK_API_KEY,
           model: AI_CONFIG.DEFAULT_MODEL,
           temperature: AI_CONFIG.DEFAULT_TEMPERATURE
         });
-        setAiService(aiServiceInstance);
         setBookmarkError(null);
-        console.log('AI Service initialized successfully with fallback API key');
+        console.log('AI initialized via hook successfully');
       } catch (error) {
-        console.error('Failed to initialize AI service:', error);
-        setBookmarkError('AI service initialization failed. Please check your API key configuration.');
+        console.error('Failed to initialize AI via hook:', error);
+        setBookmarkError('AI initialization failed. Please check your API key configuration.');
       }
     };
-    
-    initializeAIService();
-  }, []);
+    doInit();
+  }, [initialize]);
 
   // Load bookmarks on mount
   useEffect(() => {
     buildTreeStructure();
   }, [buildTreeStructure]);
+
+  // Load open tabs preview when scanning entire session is enabled
+  useEffect(() => {
+    const loadTabs = async () => {
+      if (!scanEntireSession) {
+        setOpenTabsPreview([]);
+        return;
+      }
+      try {
+        const tabs = await getOpenTabs();
+        const items = tabs
+          .filter(t => !!t.url)
+          .map(t => ({ title: t.title, url: t.url as string }));
+        setOpenTabsPreview(items);
+      } catch {
+        setOpenTabsPreview([]);
+      }
+    };
+    loadTabs();
+  }, [scanEntireSession, getOpenTabs]);
 
   // Render tree node (similar to WindowsExplorerBookmarks)
   const renderTreeNode = (node: BookmarkTreeNode): React.ReactNode => {
@@ -745,184 +822,181 @@ export const SessionsTab: React.FC<SessionsTabProps> = ({
   };
 
 
+  const foldersCount = aiCategorizedBookmarks ? Object.keys(aiCategorizedBookmarks).length : 0;
+
   return (
     <div className="sessions-tab">
-      <div className="sessions-tab__header">
-        <h3>📚 Sessions</h3>
-        <p>Organize your bookmarks with AI-powered clustering</p>
-        
-        <div className="sessions-tab__controls">
-          <button
-            onClick={() => setShowCurrentBookmarks(!showCurrentBookmarks)}
-            className="sessions-tab__toggle-bookmarks"
-          >
-            {showCurrentBookmarks ? '📁 Hide Current Bookmarks' : '📁 Show Current Bookmarks'}
-          </button>
-        </div>
-      </div>
-
-      <div className="sessions-tab__actions">
-        <button
-          onClick={handleScanLibrary}
-          disabled={isScanning || isAICategorizing || !aiService}
-          className="sessions-tab__scan-btn"
-        >
-          {isScanning || isAICategorizing ? (
-            <>
-              <div className="spinner"></div>
-              {isAICategorizing ? 'AI Categorizing Bookmarks...' : 'Scanning Library...'}
-            </>
-          ) : !aiService ? (
-            <>
-              ⏳ Initializing AI...
-            </>
-          ) : (
-            <>
-              🔍 Scan My Library
-            </>
-          )}
-        </button>
-
-        {/* {scanResults && (
-          <div className="sessions-tab__results">
-            <div className="scan-summary">
-              <div className="scan-stat">
-                <span className="stat-number">{scanResults.totalBookmarks}</span>
-                <span className="stat-label">Bookmarks</span>
-              </div>
-              <div className="scan-stat">
-                <span className="stat-number">{scanResults.totalTabs}</span>
-                <span className="stat-label">Open Tabs</span>
-              </div>
-              <div className="scan-stat">
-                <span className="stat-number">{scanResults.clustersFound}</span>
-                <span className="stat-label">Clusters</span>
-              </div>
-              <div className="scan-stat">
-                <span className="stat-number">{scanResults.processingTime}s</span>
-                <span className="stat-label">Processing</span>
-              </div>
-            </div>
-          </div>
-        )} */}
-      </div>
-
-      {/* Current Bookmarks Section */}
-      {showCurrentBookmarks && (
-        <div className="sessions-tab__current-bookmarks">
-          <div className="current-bookmarks-header">
-            <h4>📁 Current Bookmarks</h4>
-            <button
-              onClick={buildTreeStructure}
-              disabled={isLoadingBookmarks}
-              className="refresh-bookmarks-btn"
-            >
-              {isLoadingBookmarks ? '🔄' : '🔄'} Refresh
-            </button>
-          </div>
-
-          {isLoadingBookmarks ? (
-            <div className="bookmarks-loading">
-              <div className="spinner"></div>
-              <p>Loading bookmarks...</p>
-            </div>
-          ) : bookmarkError ? (
-            <div className="bookmarks-error">
-              <p>Error: {bookmarkError}</p>
-              <button onClick={buildTreeStructure}>Retry</button>
-            </div>
-          ) : (
-            <div className="bookmarks-tree-container">
-              {treeNodes.length > 0 ? (
-                <div className="tree-container">
-                  {treeNodes.map(node => renderTreeNode(node))}
-                </div>
-              ) : (
-                <div className="no-bookmarks">
-                  <p>No bookmarks found</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* <div className="sessions-tab__clusters">
-        <div className="clusters-header">
-          <h4>AI-Generated Clusters</h4>
-          <div className="cluster-controls">
-            <button onClick={selectAllClusters} className="cluster-control-btn">
-              Select All
-            </button>
-            <button onClick={deselectAllClusters} className="cluster-control-btn">
-              Deselect All
-            </button>
-          </div>
-        </div>
-
-        <div className="clusters-grid">
-          {clusters.map(cluster => (
-            <div
-              key={cluster.id}
-              className={`cluster-card ${selectedClusters.includes(cluster.id) ? 'selected' : ''}`}
-              onClick={() => toggleClusterSelection(cluster.id)}
-            >
-              <div className="cluster-card__header">
-                <input
-                  type="checkbox"
-                  checked={selectedClusters.includes(cluster.id)}
-                  onChange={() => toggleClusterSelection(cluster.id)}
-                  className="cluster-checkbox"
-                />
-                <h5 className="cluster-title">{cluster.title}</h5>
-                <span className="cluster-confidence">
-                  {Math.round(cluster.confidence * 100)}%
-                </span>
-              </div>
-              
-              <p className="cluster-description">{cluster.description}</p>
-              
-              <div className="cluster-stats">
-                <span className="cluster-count">
-                  {cluster.itemCount} items
-                </span>
-                <span className="cluster-confidence-badge">
-                  {cluster.confidence > 0.9 ? 'High' : cluster.confidence > 0.8 ? 'Medium' : 'Low'} Confidence
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div> */}
-
-      <div className="sessions-tab__footer">
-        {!hasAppliedChanges ? (
+      <div className="sessions-card">
+        {isAICategorizing ? (
           <>
-            <button
-              onClick={handlePreviewChanges}
-              disabled={!aiCategorizedBookmarks}
-              className="sessions-tab__preview-btn"
-            >
-              👁️ Preview Changes
-            </button>
-            
-            <button
-              onClick={handleApplyChanges}
-              disabled={!aiCategorizedBookmarks}
-              className="sessions-tab__apply-btn"
-            >
-              ✅ Apply Changes
-            </button>
+            <div className="sessions-scan__icon">✨</div>
+            <h3 className="sessions-scan__title">Scanning your library...</h3>
+            <p className="sessions-scan__subtitle">Analyzing topics and content locally with AI</p>
+            <div className="sessions-scan__progress-text">Processing {scanProgress.current.toLocaleString()} / {scanProgress.total.toLocaleString()} bookmarks...</div>
+            <div className="sessions-progress">
+              <div className="sessions-progress__fill" style={{ width: `${scanProgress.total > 0 ? (scanProgress.current / scanProgress.total) * 100 : 0}%` }}></div>
+            </div>
+            <div className="sessions-skeletons">
+              <div className="skeleton-card">
+                <div className="skeleton-line skeleton-line--lg"></div>
+                <div className="skeleton-line skeleton-line--md"></div>
+                <div className="skeleton-line skeleton-line--xl"></div>
+                <div className="skeleton-line skeleton-line--md"></div>
+              </div>
+              <div className="skeleton-card">
+                <div className="skeleton-line skeleton-line--lg"></div>
+                <div className="skeleton-line skeleton-line--md"></div>
+                <div className="skeleton-line skeleton-line--xl"></div>
+                <div className="skeleton-line skeleton-line--md"></div>
+              </div>
+              <div className="skeleton-card">
+                <div className="skeleton-line skeleton-line--lg"></div>
+                <div className="skeleton-line skeleton-line--md"></div>
+                <div className="skeleton-line skeleton-line--xl"></div>
+                <div className="skeleton-line skeleton-line--md"></div>
+              </div>
+            </div>
+          </>
+        ) : aiCategorizedBookmarks ? (
+          <>
+            {hasAppliedChanges ? (
+              <>
+                <h3 className="sessions-card__title">Organization Complete</h3>
+                <p className="sessions-card__subtitle">Your bookmarks have been organized into {foldersCount} {foldersCount === 1 ? 'folder' : 'folders'}. You can review or revert anytime.</p>
+                <div className="sessions-result__meta">
+                  <span className="sessions-result__label">Folders created</span>
+                  <span className="sessions-result__pill">{foldersCount} {foldersCount === 1 ? 'folder' : 'folders'}</span>
+                </div>
+                <div className="sessions-result__actions">
+                  <button onClick={handleUndoChanges} className="sessions-btn sessions-btn--outline">↩️ Undo Changes</button>
+                  <button onClick={handleNavigateQueue} className="sessions-btn sessions-btn--primary" onMouseDown={(e) => e.preventDefault()}>Next: View your Reading Queue →</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="sessions-card__title">Research Sessions</h3>
+                <p className="sessions-card__subtitle">Organize your open tabs and bookmarks with AI-powered clustering.</p>
+                <div className="sessions-result__meta">
+                  <span className="sessions-result__label">Suggested Organization</span>
+                  <span className="sessions-result__pill">{foldersCount} {foldersCount === 1 ? 'folder' : 'folders'}</span>
+                </div>
+                <div className="sessions-result__actions">
+                  <button onClick={handlePreviewChanges} className="sessions-btn sessions-btn--outline">👁️ Preview Changes</button>
+                  <button onClick={handleApplyChanges} className="sessions-btn sessions-btn--primary">✅ Apply Changes</button>
+                  <button onClick={handleNewScan} className="sessions-btn sessions-btn--outline">🔄 New Scan</button>
+                </div>
+                <div className="sessions-result__list">
+                  {Object.entries(aiCategorizedBookmarks).map(([category, bookmarks]) => {
+                    const entries = Object.entries(bookmarks);
+                    const count = entries.length;
+                    const previewItems = entries.slice(0, 2);
+                    const collapsed = resultsExpanded[category] === false;
+                    return (
+                      <div key={category} className="result-card">
+                        <div className="result-card__header" onClick={() => toggleResultCategory(category)}>
+                          <div className="result-card__title">
+                            <span className="result-card__folder">📁</span>
+                            <span className="result-card__name">{category}</span>
+                            <span className="result-card__count">{count}</span>
+                          </div>
+                          <button className="result-card__chevron" aria-label="toggle">{collapsed ? '▶' : '▼'}</button>
+                        </div>
+                        <div className="result-card__subtitle">{count} {count === 1 ? 'item' : 'items'} related to {category.toLowerCase()}</div>
+                        {collapsed ? null : (
+                          <div className="result-card__items">
+                            {previewItems.map(([title, url]) => (
+                              <div key={title} className="result-item">
+                                <div className="result-item__text">
+                                  <div className="result-item__title">{title}</div>
+                                  <div className="result-item__url">{url}</div>
+                                </div>
+                                <button className="result-item__open" onClick={() => handleBookmarkClick(url)}>Open</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </>
         ) : (
-          <button
-            onClick={handleUndoChanges}
-            className="sessions-tab__undo-btn"
-          >
-            ↩️ Undo Changes
-          </button>
+          <>
+            <h3 className="sessions-card__title">Research Sessions</h3>
+            <p className="sessions-card__subtitle">Organize your open tabs and bookmarks with AI-powered clustering.</p>
+            <div className="sessions-card__what">
+              <div className="sessions-card__what-header">
+                <span className="sessions-card__icon-box">🔍</span>
+                <span className="sessions-card__what-title">What scanning does</span>
+              </div>
+              <div className="sessions-card__bullet">
+                <span className="sessions-card__check">✓</span>
+                <div className="sessions-card__bullet-body">
+                  <div className="sessions-card__bullet-title">Analyzes your bookmarks and tabs</div>
+                  <div className="sessions-card__bullet-desc">AI reads titles, URLs, and content to understand what you've saved</div>
+                </div>
+              </div>
+              <div className="sessions-card__bullet">
+                <span className="sessions-card__check">✓</span>
+                <div className="sessions-card__bullet-body">
+                  <div className="sessions-card__bullet-title">Groups by topic and relevance</div>
+                  <div className="sessions-card__bullet-desc">Creates smart folders based on themes, not just keywords</div>
+                </div>
+              </div>
+              <div className="sessions-card__bullet">
+                <span className="sessions-card__check">✓</span>
+                <div className="sessions-card__bullet-body">
+                  <div className="sessions-card__bullet-title">Suggests personalized organization</div>
+                  <div className="sessions-card__bullet-desc">You review and approve before any changes are made</div>
+                </div>
+              </div>
+              <div className="sessions-card__divider"></div>
+              <div className="sessions-card__note">Takes 10–15 seconds • Nothing changes until you approve</div>
+            </div>
+            <div className="sessions-card__actions">
+              <div className="sessions-card__option" title="This feature, in addition to scanning all current bookmarks, will also scan and categorize all your currently open tabs.">
+                <label className="sessions-option__label">
+                  <input
+                    type="checkbox"
+                    className="sessions-option__checkbox"
+                    checked={scanEntireSession}
+                    onChange={(e) => setScanEntireSession(e.target.checked)}
+                  />
+                  <span className="sessions-option__text">Scan entire session</span>
+                </label>
+              </div>
+              <button
+                onClick={handleScanLibrary}
+                disabled={!isInitialized || aiLoading}
+                className="sessions-card__scan-btn"
+              >
+                {(!isInitialized || aiLoading) ? (
+                  <>
+                    <span className="sessions-card__btn-icon">⚙️</span>
+                    Initializing AI...
+                  </>
+                ) : (
+                  <>
+                    <span className="sessions-card__btn-icon">✨</span>
+                    Scan My Library
+                  </>
+                )}
+              </button>
+            </div>
+          </>
+        )}
+
+        {aiError && (
+          <div className="sessions-tab__ai-error">
+            <p>Error: {aiError}</p>
+          </div>
         )}
       </div>
+
+
+     
 
       {showPreview && (
         <div className="preview-modal">

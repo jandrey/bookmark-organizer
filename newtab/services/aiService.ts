@@ -330,11 +330,7 @@ export class AIService {
         If a bookmark does not fit any clear category, put it under "Other".
 
         Strict rules:
-        - Use clear categories like: "News", "Music", "Entertainment", "Programming", "AI", "Search", "Games", "Education", "Business", "Technology", "Health", "Shopping", etc.
-        - If domain is AI-related (openai, chatgpt, perplexity, huggingface), use "AI".
-        - If it's music related (spotify, letras.mus.br, youtube-music), use "Music".
-        - If it's a game site (dofus, tibia, steam, minecraft), use "Games".
-        - If it's a search engine (google, bing, yahoo), use "Search".
+        - Use clear categories like: Examples of categories you may use: "AI", "Music", "Games", "News", "Programming", "Education", "Business", "Technology", "Health", "Shopping", "Entertainment", "Restaurants", "Search", etc. You can also create new categories if needed.
         - Include EVERY input bookmark exactly once in the output.
         - Use the EXACT title strings provided in the input as object keys.
         - Return ONLY a JSON object. Do NOT include any explanation or markdown fences.

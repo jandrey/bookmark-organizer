@@ -65,6 +65,32 @@ export class ChromeBookmarkService {
   }
 
   /**
+   * Get a subtree starting at the specified node ID
+   */
+  async getSubTree(id: string): Promise<BookmarkTreeNode[]> {
+    try {
+      const subtree = await chrome.bookmarks.getSubTree(id);
+      return subtree;
+    } catch (error) {
+      console.error('Failed to get bookmark subtree:', error);
+      throw new Error('Unable to retrieve bookmark subtree');
+    }
+  }
+
+  /**
+   * Get direct children for a specified parent ID
+   */
+  async getChildren(parentId: string): Promise<BookmarkTreeNode[]> {
+    try {
+      const children = await chrome.bookmarks.getChildren(parentId);
+      return children;
+    } catch (error) {
+      console.error('Failed to get bookmark children:', error);
+      throw new Error('Unable to retrieve bookmark children');
+    }
+  }
+
+  /**
    * Get all bookmarks as a flat array
    */
   async getAllBookmarks(): Promise<ChromeBookmark[]> {
@@ -209,8 +235,13 @@ export class ChromeBookmarkService {
   async getOpenTabs(): Promise<ChromeBookmark[]> {
     try {
       const tabs = await chrome.tabs.query({});
-      return tabs.map(tab => ({
+
+      
+      // return only tabs with url that starts with http
+      return tabs.filter(tab => tab.url?.startsWith('http')).map(tab => ({
         id: `tab_${tab.id}`,
+        parentId: `tab_${tab.id}`,
+        syncing: false,
         title: tab.title || 'Untitled',
         url: tab.url,
         dateAdded: Date.now()
