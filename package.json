@@ -11,14 +11,16 @@
     "url": "https://yourwebsite.com"
   },
   "dependencies": {
+    "@google/genai": "^1.22.0",
+    "@google/generative-ai": "^0.24.1",
     "react": "^18.1.0",
     "react-dom": "^18.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
-    "typescript": "5.3.3",
-    "extension": "^2.1.3"
+    "extension": "^2.1.3",
+    "typescript": "5.3.3"
   },
   "scripts": {
     "dev": "extension dev",
